@@ -14,6 +14,12 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Validate version file
+        run: |
+          set -euo pipefail
+          jq -e '.version and (.version | type == "string") and (.version | test("^[0-9]{2}/[0-9]{2}/[0-9]{4}-[0-9]+$"))' server_version.json >/dev/null
+          echo "server_version.json is valid"
+
       - name: Deploy over SSH
         env:
           SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
@@ -36,36 +42,34 @@ jobs:
             exit 1
           fi
 
-          ssh "$SERVER_USER@$SERVER_HOST" << EOF
+          ssh -o LogLevel=ERROR -o StrictHostKeyChecking=yes -o UserKnownHostsFile=~/.ssh/known_hosts "$SERVER_USER@$SERVER_HOST" << EOF
             set -euo pipefail
-
-            echo "Connected to $(hostname)"
 
             remote_version_file="server_version.json"
             local_version="$local_version"
 
             if [ ! -f "$remote_version_file" ]; then
               printf '{\n  "version": "%s"\n}\n' "$local_version" > "$remote_version_file"
-              echo "Remote server_version.json created; version check passed."
+              echo "Remote version file initialized."
             else
               remote_version="$(jq -r '.version' "$remote_version_file")"
               if ! [[ "$remote_version" =~ ^[0-9]{2}/[0-9]{2}/[0-9]{4}-[0-9]+$ ]]; then
-                echo "Invalid remote version format: $remote_version"
+                echo "Remote version file is invalid."
                 exit 1
               fi
 
               local_suffix="${local_version##*-}"
               remote_suffix="${remote_version##*-}"
               if [ "$local_suffix" = "$remote_suffix" ]; then
-                echo "Version suffix did not change: $local_suffix"
+                echo "Version suffix did not change."
                 exit 1
               fi
             fi
 
             printf '{\n  "version": "%s"\n}\n' "$local_version" > "$remote_version_file"
-            echo "Updated remote server_version.json to $local_version"
-          
+            echo "Version file updated."
+
             ./stoneworks/newversion.sh
-          
+
             echo "Deployment completed successfully."
           EOF
