@@ -1,0 +1,71 @@
+name: Deploy
+
+on:
+  pull_request:
+    types:
+      - closed
+
+jobs:
+  deploy:
+    if: github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Deploy over SSH
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+        run: |
+          set -euo pipefail
+
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+
+          echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+
+          ssh-keyscan -H "$SERVER_HOST" >> ~/.ssh/known_hosts
+
+          local_version="$(jq -r '.version' server_version.json)"
+          if ! [[ "$local_version" =~ ^[0-9]{2}/[0-9]{2}/[0-9]{4}-[0-9]+$ ]]; then
+            echo "Invalid local version format: $local_version"
+            exit 1
+          fi
+
+          ssh "$SERVER_USER@$SERVER_HOST" << EOF
+            set -euo pipefail
+
+            echo "Connected to $(hostname)"
+
+            remote_version_file="server_version.json"
+            local_version="$local_version"
+
+            if [ ! -f "$remote_version_file" ]; then
+              printf '{\n  "version": "%s"\n}\n' "$local_version" > "$remote_version_file"
+              echo "Remote server_version.json created; version check passed."
+            else
+              remote_version="$(jq -r '.version' "$remote_version_file")"
+              if ! [[ "$remote_version" =~ ^[0-9]{2}/[0-9]{2}/[0-9]{4}-[0-9]+$ ]]; then
+                echo "Invalid remote version format: $remote_version"
+                exit 1
+              fi
+
+              local_suffix="${local_version##*-}"
+              remote_suffix="${remote_version##*-}"
+              if [ "$local_suffix" = "$remote_suffix" ]; then
+                echo "Version suffix did not change: $local_suffix"
+                exit 1
+              fi
+            fi
+
+            printf '{\n  "version": "%s"\n}\n' "$local_version" > "$remote_version_file"
+            echo "Updated remote server_version.json to $local_version"
+          
+            ./stoneworks/newversion.sh
+          
+            echo "Deployment completed successfully."
+          EOF
