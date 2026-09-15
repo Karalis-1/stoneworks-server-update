@@ -1,0 +1,16 @@
+name: Validate version file
+
+on:
+  pull_request:
+
+jobs:
+  validate-version-file:
+    name: Validate version file
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate version file
+        uses: ./.github/actions/validate-server-version
