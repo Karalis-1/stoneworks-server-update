@@ -81,11 +81,7 @@ jobs:
             log info "Version file updated."
 
             cd stoneworks
-            if [ "$dry_run" = "true" ]; then
-              ./newversion.sh --dry-run
-            else
-              ./newversion.sh
-            fi
+            ./newversion.sh "$dry_run"
 
             log info "Deployment completed successfully."
           EOF
