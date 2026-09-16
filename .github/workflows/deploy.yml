@@ -29,53 +29,64 @@ jobs:
       - name: Deploy over SSH
         env:
           SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
           SERVER_HOST: ${{ secrets.SERVER_HOST }}
           SERVER_USER: ${{ secrets.SERVER_USER }}
         run: |
           set -euo pipefail
+          source .github/log.sh
 
           mkdir -p ~/.ssh
           chmod 700 ~/.ssh
 
-          echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
 
-          ssh-keyscan -H "$SERVER_HOST" >> ~/.ssh/known_hosts
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
 
           local_version="$(jq -r '.version' server_version.json)"
-          if ! [[ "$local_version" =~ ^[0-9]{2}/[0-9]{2}/[0-9]{4}-[0-9]+$ ]]; then
-            echo "Invalid local version format: $local_version"
-            exit 1
-          fi
+          dry_run="$(jq -r '.dry_run // false' server_version.json)"
+          log info "Deploying version ${local_version} (dry_run=${dry_run})"
 
-          ssh -o LogLevel=ERROR -o StrictHostKeyChecking=yes -o UserKnownHostsFile=~/.ssh/known_hosts "$SERVER_USER@$SERVER_HOST" << EOF
+          scp -q -o LogLevel=ERROR -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile=~/.ssh/known_hosts \
+            .github/log.sh "$SERVER_USER@$SERVER_HOST:.stoneworks-log.sh"
+
+          ssh -o LogLevel=ERROR -o StrictHostKeyChecking=yes -o UserKnownHostsFile=~/.ssh/known_hosts \
+            "$SERVER_USER@$SERVER_HOST" \
+            "local_version=$(printf '%q' "$local_version") dry_run=$(printf '%q' "$dry_run") bash -s" << 'EOF'
             set -euo pipefail
+            source "$HOME/.stoneworks-log.sh"
 
             remote_version_file="server_version.json"
-            local_version="$local_version"
 
             if [ ! -f "$remote_version_file" ]; then
               printf '{\n  "version": "%s"\n}\n' "$local_version" > "$remote_version_file"
-              echo "Remote version file initialized."
+              log info "Remote version file initialized."
             else
               remote_version="$(jq -r '.version' "$remote_version_file")"
               if ! [[ "$remote_version" =~ ^[0-9]{2}/[0-9]{2}/[0-9]{4}-[0-9]+$ ]]; then
-                echo "Remote version file is invalid."
+                log error "Remote version file is invalid."
                 exit 1
               fi
 
               local_suffix="${local_version##*-}"
               remote_suffix="${remote_version##*-}"
               if [ "$local_suffix" = "$remote_suffix" ]; then
-                echo "Version suffix did not change."
+                log error "Version suffix did not change."
                 exit 1
               fi
             fi
 
             printf '{\n  "version": "%s"\n}\n' "$local_version" > "$remote_version_file"
-            echo "Version file updated."
+            log info "Version file updated."
 
-            ./stoneworks/newversion.sh
+            if [ "$dry_run" = "true" ]; then
+              ./stoneworks/newversion.sh --dry-run
+            else
+              ./stoneworks/newversion.sh
+            fi
 
-            echo "Deployment completed successfully."
+            log info "Deployment completed successfully."
           EOF

@@ -7,5 +7,9 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        jq -e '.version and (.version | type == "string") and (.version | test("^[0-9]{2}/[0-9]{2}/[0-9]{4}-[0-9]+$"))' server_version.json >/dev/null
-        echo "server_version.json is valid"
+        jq -e '
+          (.version | type == "string" and test("^[0-9]{2}/[0-9]{2}/[0-9]{4}-[0-9]+$"))
+          and ((.dry_run // false) | type == "boolean")
+        ' server_version.json >/dev/null
+        source .github/log.sh
+        log info "server_version.json is valid"
