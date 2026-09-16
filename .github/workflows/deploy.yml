@@ -82,10 +82,11 @@ jobs:
             printf '{\n  "version": "%s"\n}\n' "$local_version" > "$remote_version_file"
             log info "Version file updated."
 
+            cd stoneworks
             if [ "$dry_run" = "true" ]; then
-              ./stoneworks/newversion.sh --dry-run
+              ./newversion.sh --dry-run
             else
-              ./stoneworks/newversion.sh
+              ./newversion.sh
             fi
 
             log info "Deployment completed successfully."
